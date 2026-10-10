@@ -1,0 +1,4 @@
+# Supply-chain guard: refuse package versions published less than a day ago.
+[install]
+saveTextLockfile = true
+minimumReleaseAge = 86400
