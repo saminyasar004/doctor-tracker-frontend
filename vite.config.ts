@@ -11,7 +11,14 @@ import tailwindcss from "@tailwindcss/vite";
  *  2. `tailwindcss`    - Tailwind v4 CSS pipeline
  *  3. `react`          - React fast refresh / JSX transform
  */
-const plugins: PluginOption[] = [tanstackStart(), tailwindcss(), react()];
+const plugins: PluginOption[] = [
+  // SPA mode: the build emits a static dist/client/index.html instead of
+  // expecting a Node server to render the shell (every route is `ssr: false`).
+  // `outputPath` defaults to "/_shell", which static hosts cannot serve at "/".
+  tanstackStart({ spa: { enabled: true, prerender: { outputPath: "/index" } } }),
+  tailwindcss(),
+  react(),
+];
 
 export default defineConfig({
   plugins,

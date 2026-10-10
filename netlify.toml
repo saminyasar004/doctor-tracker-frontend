@@ -1,0 +1,43 @@
+# Netlify deployment for the Doctor Tracker admin portal.
+#
+# The app is a client-rendered SPA (every route is `ssr: false`), built by
+# TanStack Start in SPA mode, so the build output is a static site:
+#
+#   bun run build  ->  dist/client/   (index.html + hashed assets)
+#
+# Two things matter for a static host:
+#   1. the publish directory is `dist/client` (NOT `dist`), because the Node
+#      server bundle in `dist/server` is not used on Netlify;
+#   2. unknown paths must fall back to index.html, otherwise a direct visit to
+#      /doctors or a page refresh returns Netlify's "Page not found".
+
+[build]
+  command = "bun install --frozen-lockfile && bun run build"
+  publish = "dist/client"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+# A hashed asset that is missing must be a real 404: falling back to index.html
+# would hand the browser HTML where it expects JavaScript. Must come first.
+[[redirects]]
+  from = "/assets/*"
+  to = "/index.html"
+  status = 404
+
+# SPA fallback: serve index.html for any path that is not a real file.
+# Netlify checks the filesystem first, so real assets still win over this.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

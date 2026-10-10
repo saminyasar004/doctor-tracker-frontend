@@ -26,18 +26,18 @@ from the API — there is no mock data and no client-side aggregation of large c
 
 ## Stack
 
-| Concern            | Choice                                                                  |
-| ------------------ | ----------------------------------------------------------------------- |
-| Framework          | React 19 + TanStack Start (Vite 8, file-system routing)                |
-| Language           | TypeScript in strict mode (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) |
-| Server state       | TanStack Query (`keepPreviousData`, invalidation on mutation)           |
-| Forms              | React Hook Form + Zod                                                  |
-| UI                 | shadcn/ui (Radix) primitives on Tailwind CSS v4                         |
-| Charts             | Recharts                                                                |
-| Animation          | Framer Motion                                                           |
-| Icons              | lucide-react                                                            |
-| Dates              | date-fns                                                                |
-| Package manager    | bun                                                                      |
+| Concern         | Choice                                                                               |
+| --------------- | ------------------------------------------------------------------------------------ |
+| Framework       | React 19 + TanStack Start (Vite 8, file-system routing)                              |
+| Language        | TypeScript in strict mode (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) |
+| Server state    | TanStack Query (`keepPreviousData`, invalidation on mutation)                        |
+| Forms           | React Hook Form + Zod                                                                |
+| UI              | shadcn/ui (Radix) primitives on Tailwind CSS v4                                      |
+| Charts          | Recharts                                                                             |
+| Animation       | Framer Motion                                                                        |
+| Icons           | lucide-react                                                                         |
+| Dates           | date-fns                                                                             |
+| Package manager | bun                                                                                  |
 
 ---
 
@@ -61,9 +61,9 @@ bun run dev
 
 Then open **http://localhost:3000** and sign in:
 
-| Email                      | Password       |
-| -------------------------- | -------------- |
-| `admin@doctortracker.com`  | `Admin@12345`  |
+| Email                     | Password      |
+| ------------------------- | ------------- |
+| `admin@doctortracker.com` | `Admin@12345` |
 
 ---
 
@@ -71,10 +71,10 @@ Then open **http://localhost:3000** and sign in:
 
 Copy `.env.example` to `.env` (or export the variable in your shell):
 
-| Variable         | Required | Default                            | Description                                                       |
-| ---------------- | -------- | ---------------------------------- | ----------------------------------------------------------------- |
-| `VITE_API_URL`   | no       | `http://localhost:4000/api/v1`     | Base URL of the Doctor Tracker API                                 |
-| `PORT`           | no       | `3000`                             | Dev/preview server port (must match the backend's CORS allow-list) |
+| Variable       | Required | Default                        | Description                                                        |
+| -------------- | -------- | ------------------------------ | ------------------------------------------------------------------ |
+| `VITE_API_URL` | no       | `http://localhost:4000/api/v1` | Base URL of the Doctor Tracker API                                 |
+| `PORT`         | no       | `3000`                         | Dev/preview server port (must match the backend's CORS allow-list) |
 
 `VITE_API_URL` is inlined at build time, so rebuild after changing it in production.
 
@@ -82,17 +82,17 @@ Copy `.env.example` to `.env` (or export the variable in your shell):
 
 ## Scripts
 
-| Script                 | What it does                                                            |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `bun run dev`          | Dev server with HMR on :3000                                            |
-| `bun run build`        | Production build to `dist/` (client + server bundle)                    |
-| `bun run preview`      | Serves the production build locally                                     |
-| `bun run typecheck`    | `tsc --noEmit`                                                          |
-| `bun run lint`         | ESLint (flat config, includes Prettier)                                 |
-| `bun run format`       | Prettier, write mode                                                    |
-| `bun run test`         | Vitest unit tests                                                        |
-| `bun run smoke`        | Headless-Chrome journey: create → search → profile → delete a doctor     |
-| `bun run screenshots`  | Headless-Chrome captures of every screen into `docs/screenshots/`        |
+| Script                | What it does                                                         |
+| --------------------- | -------------------------------------------------------------------- |
+| `bun run dev`         | Dev server with HMR on :3000                                         |
+| `bun run build`       | Production build to `dist/` (client + server bundle)                 |
+| `bun run preview`     | Serves the production build locally                                  |
+| `bun run typecheck`   | `tsc --noEmit`                                                       |
+| `bun run lint`        | ESLint (flat config, includes Prettier)                              |
+| `bun run format`      | Prettier, write mode                                                 |
+| `bun run test`        | Vitest unit tests                                                    |
+| `bun run smoke`       | Headless-Chrome journey: create → search → profile → delete a doctor |
+| `bun run screenshots` | Headless-Chrome captures of every screen into `docs/screenshots/`    |
 
 `smoke` and `screenshots` drive a real browser over the DevTools protocol and need both the API
 and the dev server running, plus Chrome available at `/usr/bin/google-chrome`.
@@ -143,7 +143,7 @@ blank the table.
 **Null handling is centralised.** The API returns `null` for absent optional columns; `mappers.ts`
 converts those to optional properties once, so components deal with one shape.
 
-**Auth uses both mechanisms the API offers.** The backend sets httpOnly cookies *and* returns the
+**Auth uses both mechanisms the API offers.** The backend sets httpOnly cookies _and_ returns the
 access token; the client sends `Authorization: Bearer` (mirrored in `localStorage` so a reload keeps
 the session) and `credentials: "include"`. A `401` triggers exactly one silent
 `POST /auth/refresh` and a replay of the original request before giving up.
@@ -173,13 +173,13 @@ logic is URL state and the query/mutation wiring.
 
 Captured with `bun run screenshots` (real API, seeded data):
 
-| View           | File                                     |
-| -------------- | ---------------------------------------- |
-| Login          | `docs/screenshots/login.png`             |
-| Dashboard      | `docs/screenshots/dashboard.png`         |
-| Doctors        | `docs/screenshots/doctors.png`           |
-| Doctor profile | `docs/screenshots/doctor-detail.png`     |
-| Patients       | `docs/screenshots/patients.png`          |
+| View           | File                                 |
+| -------------- | ------------------------------------ |
+| Login          | `docs/screenshots/login.png`         |
+| Dashboard      | `docs/screenshots/dashboard.png`     |
+| Doctors        | `docs/screenshots/doctors.png`       |
+| Doctor profile | `docs/screenshots/doctor-detail.png` |
+| Patients       | `docs/screenshots/patients.png`      |
 
 ---
 
@@ -200,27 +200,69 @@ pagination work. It cleans up after itself, so it is safe to re-run.
 
 ## Deploying
 
-Any static host works; the build output is in `dist/`.
+The app is a **static SPA**. TanStack Start runs in SPA mode (see `src/start.ts` and the `spa` option in
+`vite.config.ts`), so the build emits `dist/client/index.html` plus hashed assets and no Node server is
+needed. That is what makes it deployable to Netlify, Cloudflare Pages, S3 or nginx.
 
 ```bash
 bun install --frozen-lockfile
-bun run build
-# serve dist/client as the SPA root, and dist/server with `node dist/server/index.js`
-# for the server build (or a static host + SPA rewrite for a client-only deploy)
+bun run build          # -> dist/client
 ```
 
-Set `VITE_API_URL` to the deployed API before building, and make sure the API's `FRONTEND_URL`
-env var lists this app's origin — CORS is not wildcarded because the API authenticates with cookies.
+### Netlify
 
----
+`netlify.toml` is checked in, so the deploy needs no dashboard configuration beyond the two
+environment variables:
+
+```toml
+[build]
+  command   = "bun install --frozen-lockfile && bun run build"
+  publish   = "dist/client"          # NOT "dist" - dist/server is not used on Netlify
+```
+
+Two settings do the real work:
+
+| Setting                          | Why                                                                                                                                           |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `publish = "dist/client"`        | The build writes `dist/client` **and** `dist/server`; publishing `dist` leaves the static host unable to find `index.html`.                   |
+| `/* -> /index.html` (status 200) | Every route is client-side, so a direct visit to `/doctors` or a refresh must fall back to the SPA shell instead of returning the host's 404. |
+| `/assets/* -> 404`               | A missing hashed asset is a real 404; falling back to `index.html` would hand the browser HTML where it expects JavaScript.                   |
+
+The same rules are also in `public/_redirects`, which is copied into the publish directory, so the
+fallback still applies if only the files are uploaded.
+
+> Netlify needs **bun** at build time. The `NETLIFY_USE_PNPM`/`NETLIFY_USE_YARN` toggles must be off,
+> or replace the command with `npm ci && npm run build`.
+
+### Environment variables
+
+| Where             | Variable       | Value                                                  |
+| ----------------- | -------------- | ------------------------------------------------------ |
+| Netlify build env | `VITE_API_URL` | `https://<your-api-host>/api/v1`                       |
+| **API** env       | `FRONTEND_URL` | `https://doctortracker.netlify.app` (the exact origin) |
+
+Both sides are required. `VITE_API_URL` is inlined at build time, and the API does **not** allow a
+wildcard CORS origin because it authenticates with cookies — a mismatch shows up in the browser console
+as `net::ERR_FAILED` on every request, with the list stuck on its loading skeleton.
+
+Rebuild after changing `VITE_API_URL`.
+
+### Other hosts
+
+Any static host works; just make sure `/` and every unknown path serve `index.html`:
+
+- **Cloudflare Pages** — build `bun run build`, output `dist/client`; `public/_redirects` is picked up automatically.
+- **nginx** — `root /path/dist/client; try_files $uri $uri/ /index.html;`
 
 ## Troubleshooting
 
-| Symptom                                          | Cause / fix                                                                        |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| Every page redirects to `/login`                  | The token was cleared — sign in again; check the browser console for a `401`        |
-| Sign-in fails with `Invalid email or password`   | The API is not seeded: run `yarn prisma db seed` in the backend                      |
-| Lists stay empty, network shows `401`             | The access token expired and the refresh call failed (backend down or `FRONTEND_URL` mismatch) |
-| "Could not load doctors"                         | The API is unreachable — check `VITE_API_URL` and that the backend is running        |
-| `429 Too Many Requests` on login                 | The backend limits login to 5/minute; wait a minute                                 |
-| CORS error in the console                        | Add this app's origin to the backend's `FRONTEND_URL`                                |
+| Symptom                                        | Cause / fix                                                                                    |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Every page redirects to `/login`               | The token was cleared — sign in again; check the browser console for a `401`                   |
+| Sign-in fails with `Invalid email or password` | The API is not seeded: run `yarn prisma db seed` in the backend                                |
+| Lists stay empty, network shows `401`          | The access token expired and the refresh call failed (backend down or `FRONTEND_URL` mismatch) |
+| "Could not load doctors"                       | The API is unreachable — check `VITE_API_URL` and that the backend is running                  |
+| `429 Too Many Requests` on login               | The backend limits login to 5/minute; wait a minute                                            |
+| CORS error in the console / list stuck loading | The API's `FRONTEND_URL` does not include this origin (`net::ERR_FAILED`)                      |
+| Netlify shows "Page not found"                 | Publish directory must be `dist/client` **and** the SPA redirect must be in place              |
+| `bun: command not found` on Netlify            | Turn off the pnpm/yarn toggles so Netlify uses bun                                             |

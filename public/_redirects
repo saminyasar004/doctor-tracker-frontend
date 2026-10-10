@@ -1,0 +1,7 @@
+# Netlify / Cloudflare Pages rules, read from the publish directory.
+#
+# A hashed asset that is missing is a real 404 (returning index.html would hand
+# the browser HTML where it expects JavaScript); everything else falls back to the
+# SPA shell so /doctors, /patients and page refreshes work on a static host.
+/assets/*  /index.html  404
+/*        /index.html  200
