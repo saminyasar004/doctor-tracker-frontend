@@ -8,6 +8,9 @@
  *   node scripts/ui-smoke.mjs [baseUrl]
  */
 import { setTimeout as sleep } from "node:timers/promises";
+import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const baseUrl = process.argv[2] ?? "http://localhost:3000";
 const API = process.env.API_URL ?? "http://localhost:4000/api/v1";
@@ -52,6 +55,38 @@ const once = (method, ms = 15000) =>
 
 await send("Page.enable");
 await send("Runtime.enable");
+
+/* ----------------------------------------------------------- API coverage ---
+ * Every request the browser makes is recorded and, at the end, diffed against the
+ * API's own OpenAPI document. That turns "every endpoint is wired" into something
+ * measured rather than assumed.
+ */
+const apiHits = new Map();
+const apiHitsKey = (key) => [...apiHits.keys()].includes(key);
+const normalise = (url) => {
+  const path = url.split("?")[0].replace(/^https?:\/\/[^/]+/, "");
+  const method = "GET";
+  return `${method} ${path.replace(/[a-z0-9]{20,}/gi, "{id}")}`;
+};
+const recordApi = (p) => {
+  const url = p.request?.url ?? "";
+  if (!url.includes("/api/") && !url.includes("/health")) return;
+  const entry = normalise(url);
+  if (!apiHits.has(entry)) apiHits.set(entry, { methods: new Set(), url });
+};
+listeners.set("Network.requestWillBeSent", [recordApi]);
+ws.addEventListener("message", (e) => {
+  const m = JSON.parse(e.data);
+  if (m.method !== "Network.requestWillBeSent") return;
+  const url = m.params.request?.url ?? "";
+  if (!url.includes("/api/") && !url.includes("/health")) return;
+  const key = `${m.params.request.method} ${url
+    .split("?")[0]
+    .replace(/^https?:\/\/[^/]+/, "")
+    .replace(/[a-z0-9]{20,}/gi, "{id}")}`;
+  apiHits.set(key, { methods: new Set([m.params.request.method]), url });
+});
+await send("Network.enable");
 
 async function evaluate(expression) {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
@@ -183,6 +218,37 @@ async function fill(labelText, value) {
   await sleep(120);
 }
 
+/**
+ * Like {@link fill} but clears the field first.
+ *
+ * `Input.insertText` appends to the current value, so a prefilled field such as the
+ * age on an edit sheet would otherwise become "3344" and fail validation.
+ */
+async function replaceField(labelText, value) {
+  await clickMeasured(controlFor(labelText), `field "${labelText}"`);
+  for (const { modifiers, key, code, vk } of [
+    { modifiers: 2, key: "a", code: "KeyA", vk: 65 },
+    { key: "Delete", code: "Delete", vk: 46 },
+  ]) {
+    await send("Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      modifiers,
+      key,
+      code,
+      windowsVirtualKeyCode: vk,
+    });
+    await send("Input.dispatchKeyEvent", {
+      type: "keyUp",
+      modifiers,
+      key,
+      code,
+      windowsVirtualKeyCode: vk,
+    });
+  }
+  await send("Input.insertText", { text: value });
+  await sleep(120);
+}
+
 /** Clicks the control of a labelled field (used for Radix Select triggers). */
 async function clickField(labelText) {
   await clickMeasured(controlFor(labelText), `control "${labelText}"`);
@@ -201,7 +267,11 @@ async function selectOption(labelText, option) {
 
   const index = await evaluate(`(() => {
     const items = [...document.querySelectorAll("[role=listbox] [role=option]")];
-    return { target: items.findIndex((o) => o.textContent.trim() === ${JSON.stringify(option)}), total: items.length };
+    const wanted = ${JSON.stringify(option)};
+    return {
+      target: wanted === null ? 0 : items.findIndex((o) => o.textContent.trim() === wanted),
+      total: items.length,
+    };
   })()`);
   if (index.target < 0) throw new Error(`no option "${option}" (of ${index.total})`);
 
@@ -225,8 +295,26 @@ async function selectOption(labelText, option) {
   const picked = await evaluate(
     `${controlFor(labelText)} ? ${controlFor(labelText)}.textContent.trim() : ""`,
   );
-  if (!picked.toLowerCase().includes(option.toLowerCase())) {
+  if (option !== null && !picked.toLowerCase().includes(option.toLowerCase())) {
     throw new Error(`select "${option}" landed on "${picked}"`);
+  }
+}
+
+/**
+ * Completes every required patient field, so the form actually submits.
+ *
+ * `GET /patients/filter-options` feeds the condition list and the doctor picker;
+ * `null` as an option picks the first entry, which is enough for a journey that only
+ * needs *a* valid assignment.
+ */
+async function fillPatientForm(name, age) {
+  await fill("full name", name);
+  await fill("age", age);
+  await fill("phone", "+15550123");
+  await selectOption("gender", "Male");
+  await selectOption("condition", "Migraine");
+  if (await evaluate(`!!${controlFor("assigned doctor")}`)) {
+    await selectOption("assigned doctor", null);
   }
 }
 
@@ -359,6 +447,372 @@ await goto(`${baseUrl}/patients?limit=5&page=2`);
 check(
   "patients pagination works",
   await evaluate(`document.body.innerText.includes("Showing 6 to 10")`),
+);
+
+// ------------------------------------------------- uploads (POST /uploads) ---
+// The avatar picker must upload through the API rather than embedding a data URL,
+// because the doctor/patient DTOs validate `avatarUrl` as an absolute http(s) URL.
+const UPLOAD_FIXTURE = join(tmpdir(), "ui-smoke-avatar.png");
+await writeFile(
+  UPLOAD_FIXTURE,
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGP8//8/AzJgYkAD" +
+      "M0YqUf9EQtGKFToNZUqMCJHoUSPUAAAAAElFTkSuQmCC",
+    "base64",
+  ),
+);
+
+await goto(`${baseUrl}/patients`);
+await evaluate(`(() => {
+  const btn = [...document.querySelectorAll("button")].find((b) => b.innerText.includes("Add patient"));
+  btn?.click();
+  return !!btn;
+})()`);
+await waitFor(`document.body.innerText.includes("Full name")`);
+
+const uploadRequests = [];
+listeners.set("Network.requestWillBeSent", [
+  (p) => {
+    if (p.request.url.includes("/uploads/image"))
+      uploadRequests.push(`${p.request.method} ${p.request.url}`);
+  },
+]);
+await send("Network.enable");
+
+// Attach a real file to the picker's <input type="file"> so the component performs
+// the multipart POST itself, exactly as a user picking a photo would.
+const attached = await evaluate(`(() => {
+  const input = document.querySelector('input[type=file]');
+  if (!input) return null;
+  input.dataset.smokeId = "avatar-input";
+  return true;
+})()`);
+check("patient form exposes an avatar file input", attached === true);
+
+const { root } = await send("DOM.getDocument", { depth: -1 });
+const { nodeId } = await send("DOM.querySelector", {
+  nodeId: root.nodeId,
+  selector: 'input[data-smoke-id="avatar-input"]',
+});
+if (nodeId) {
+  await send("DOM.setFileInputFiles", { files: [UPLOAD_FIXTURE], nodeId });
+}
+
+await waitFor(
+  `(() => { const img = document.querySelector('img[alt="Avatar preview"]'); return !!img && /^https?:/.test(img.src); })()`,
+  20000,
+);
+const avatarSrc = await evaluate(`document.querySelector('img[alt="Avatar preview"]')?.src ?? ""`);
+check(
+  "POST /uploads/image runs from the picker and stores a hosted image",
+  uploadRequests.some((r) => r.startsWith("POST")) && avatarSrc.startsWith("http"),
+  avatarSrc.slice(0, 80),
+);
+check("avatar is a real URL, not a data URL", !avatarSrc.startsWith("data:"));
+
+const avatarLoads = await evaluate(
+  `(async () => { const img = document.querySelector('img[alt="Avatar preview"]'); if (!img?.src) return false; try { const r = await fetch(img.src, { method: "GET" }); return r.ok; } catch { return false; } })()`,
+);
+check("uploaded avatar URL actually resolves", avatarLoads === true);
+
+// Removing the photo must call DELETE /uploads/image for the stored asset.
+const removed = await evaluate(`(() => {
+  const btn = document.querySelector('button[aria-label="Remove photo"]');
+  if (!btn) return false;
+  btn.click();
+  return true;
+})()`);
+check("remove-photo control is present", removed === true);
+await sleep(1500);
+check(
+  "DELETE /uploads/image runs when the photo is removed",
+  uploadRequests.some((r) => r.startsWith("DELETE")),
+  uploadRequests.join(" | ") || "no upload requests seen",
+);
+
+// -------------------------------------------- patient profile (GET /patients/:id) ---
+await goto(`${baseUrl}/patients`);
+await waitFor(`document.querySelector("tbody tr")`);
+const patientId = await evaluate(`(() => {
+  const link = document.querySelector('a[href^="/patients/"]');
+  return link ? link.getAttribute("href").split("/").pop() : null;
+})()`);
+check("patient rows link to the profile route", !!patientId, patientId ?? "no link");
+
+if (patientId) {
+  // Client-side navigation does not fire a page load, so wait for the route itself.
+  await goto(`${baseUrl}/patients/${patientId}`);
+  await waitFor(`location.pathname.endsWith(${JSON.stringify(`/patients/${patientId}`)})`, 15000);
+  await waitFor(`document.querySelector("h1")`, 15000);
+  await sleep(600);
+  const profile = await evaluate(`document.body.innerText`);
+  check("GET /patients/:id renders the profile", !profile.includes("Could not load this patient"));
+  check("profile shows the care section", /Care|Assigned doctor|Unassigned/.test(profile));
+
+  const stillThere = await (
+    await fetch(`${API}/patients/${patientId}`, {
+      headers: { Authorization: `Bearer ${auth.data.accessToken}` },
+    })
+  ).json();
+  check(
+    "profile shows the same record the API returns",
+    profile.includes(stillThere.data.name),
+    stillThere.data.name,
+  );
+}
+
+// ---------------------------------------------- session revalidation (/auth/me) ---
+const meCalls = [];
+listeners.set("Network.requestWillBeSent", [
+  (p) => {
+    if (p.request.url.includes("/auth/me")) meCalls.push(p.request.url);
+  },
+]);
+await send("Network.enable");
+await goto(`${baseUrl}/dashboard`);
+await waitFor(`document.querySelector("h1")`);
+await sleep(1200);
+check(
+  "GET /auth/me is called to revalidate the session",
+  meCalls.length > 0,
+  `${meCalls.length} call(s)`,
+);
+
+// ---------------------------------------------------------- health (GET /health) ---
+const health = await evaluate(`(async () => {
+  const base = ${JSON.stringify(API)}.split("/api/v")[0];
+  const res = await fetch(base + "/health");
+  const body = await res.json();
+  return { ok: res.ok, status: body && body.data && body.data.status, database: body && body.data && body.data.database };
+})()`);
+check(
+  "GET /health is reachable and reports the database",
+  health.ok && health.status === "ok" && health.database === "up",
+  `status=${health.status} database=${health.database}`,
+);
+
+// ------------------------------------- doctor edit + nested patient endpoints ---
+// Exercises PATCH /doctors/{id}, POST and DELETE /doctors/{id}/patients.
+await goto(`${baseUrl}/doctors`);
+await waitFor(`document.querySelector("tbody tr")`);
+const doctorId = await evaluate(`(() => {
+  const link = document.querySelector('a[href^="/doctors/"]');
+  return link ? link.getAttribute("href").split("/").pop() : null;
+})()`);
+check("doctor rows link to the profile route", !!doctorId, doctorId ?? "no link");
+
+if (doctorId) {
+  await goto(`${baseUrl}/doctors/${doctorId}`);
+  await waitFor(`document.body.innerText.includes("Patients")`);
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === "Edit");
+    btn?.click();
+    return !!btn;
+  })()`);
+  await waitFor(`document.body.innerText.includes("Full name")`);
+  await replaceField("full name", `Dr. Edited ${stamp}`);
+  await clickText("form button", "Save changes");
+  await sleep(2500);
+  const renamed = await (
+    await fetch(`${API}/doctors/${doctorId}`, {
+      headers: { Authorization: `Bearer ${auth.data.accessToken}` },
+    })
+  ).json();
+  check(
+    "PATCH /doctors/:id persists the rename",
+    renamed.data?.name === `Dr. Edited ${stamp}`,
+    renamed.data?.name,
+  );
+
+  // add a patient to this doctor through the nested route
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) =>
+      b.innerText.includes("Add patient"));
+    btn?.click();
+    return !!btn;
+  })()`);
+  await waitFor(`document.body.innerText.includes("Full name")`);
+  await fillPatientForm(`Nested Patient ${stamp}`, "41");
+  await clickText("form button", "Add patient");
+  await sleep(2500);
+
+  const nested = await (
+    await fetch(`${API}/doctors/${doctorId}/patients?search=Nested%20Patient%20${stamp}`, {
+      headers: { Authorization: `Bearer ${auth.data.accessToken}` },
+    })
+  ).json();
+  const nestedPatient = nested.data?.[0];
+  check(
+    "POST /doctors/:id/patients attaches the patient",
+    !!nestedPatient,
+    nested.data?.length ?? 0,
+  );
+
+  if (nestedPatient) {
+    // remove it again through the row action menu
+    await goto(`${baseUrl}/doctors/${doctorId}?q=Nested+Patient+${stamp}`);
+    await waitFor(`document.querySelector("tbody tr")`);
+    // Radix opens the menu on pointerdown, so a synthetic .click() is ignored.
+    await clickMeasured(
+      `document.querySelector('button[aria-label^="Actions for"]')`,
+      "row actions menu",
+    );
+    await sleep(700);
+    await clickText("[role=menuitem]", "Remove");
+    await sleep(600);
+    await clickText("[role=alertdialog] button", "Delete");
+    await sleep(2000);
+    const after = await (
+      await fetch(`${API}/doctors/${doctorId}/patients?search=Nested%20Patient%20${stamp}`, {
+        headers: { Authorization: `Bearer ${auth.data.accessToken}` },
+      })
+    ).json();
+    check(
+      "DELETE /doctors/:id/patients/:patientId detaches the patient",
+      (after.data?.length ?? 0) === 0,
+      `${after.data?.length ?? 0} left`,
+    );
+  }
+}
+
+// --------------------------------------------- patient create / edit / delete ---
+// POST /patients, PATCH /patients/:id and DELETE /patients/:id.
+await goto(`${baseUrl}/patients`);
+await evaluate(`(() => {
+  const btn = [...document.querySelectorAll("button")].find((b) => b.innerText.includes("Add patient"));
+  btn?.click();
+  return !!btn;
+})()`);
+await waitFor(`document.body.innerText.includes("Full name")`);
+await fillPatientForm(`CRUD Patient ${stamp}`, "33");
+await clickText("form button", "Create patient");
+await sleep(2500);
+
+const created = await (
+  await fetch(`${API}/patients?search=CRUD%20Patient%20${stamp}`, {
+    headers: { Authorization: `Bearer ${auth.data.accessToken}` },
+  })
+).json();
+const crudPatient = created.data?.[0];
+check("POST /patients creates a record", !!crudPatient, created.data?.length ?? 0);
+
+if (crudPatient) {
+  await goto(`${baseUrl}/patients/${crudPatient.id}`);
+  await waitFor(`document.querySelector("h1")`);
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === "Edit");
+    btn?.click();
+    return !!btn;
+  })()`);
+  await waitFor(`document.body.innerText.includes("Full name")`);
+  await replaceField("age", "44");
+  await clickText("form button", "Save changes");
+  await sleep(2500);
+  const edited = await (
+    await fetch(`${API}/patients/${crudPatient.id}`, {
+      headers: { Authorization: `Bearer ${auth.data.accessToken}` },
+    })
+  ).json();
+  check(
+    "PATCH /patients/:id persists the change",
+    edited.data?.age === 44,
+    `age=${edited.data?.age}`,
+  );
+
+  await clickMeasured(
+    `[...document.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "More actions")`,
+    "more actions menu",
+  );
+  await sleep(500);
+  await clickText("[role=menuitem]", "Delete patient");
+  await sleep(500);
+  await clickText("button", "Delete patient");
+  await sleep(2500);
+  const gone = await fetch(`${API}/patients/${crudPatient.id}`, {
+    headers: { Authorization: `Bearer ${auth.data.accessToken}` },
+  });
+  check("DELETE /patients/:id removes the record", gone.status === 404, `status ${gone.status}`);
+}
+
+// ------------------------------------------------ token refresh + re-login ---
+// The API accepts a valid httpOnly access cookie even when the bearer token is
+// bogus, so the cookie itself has to go for the client to see a 401 and rotate.
+// CDP can delete httpOnly cookies; the refresh cookie stays, which is exactly the
+// real-world "access token expired mid-session" case.
+await goto(`${baseUrl}/dashboard`);
+await send("Network.deleteCookies", { name: "access_token", url: baseUrl });
+await evaluate(`localStorage.setItem("dt_access_token", "expired.token.value"); "ok"`);
+await goto(`${baseUrl}/doctors`);
+await waitFor(
+  `document.querySelector("tbody tr") || document.body.innerText.includes("Sign in")`,
+  15000,
+);
+check(
+  "expired access token rotates through POST /auth/refresh",
+  apiHitsKey("POST /api/v1/auth/refresh"),
+);
+
+await clickMeasured(`document.querySelector('button[aria-label="Account menu"]')`, "account menu");
+await sleep(700);
+await clickText("[role=menuitem]", "Log out");
+await sleep(2000);
+await goto(`${baseUrl}/login`);
+await waitFor(`document.body.innerText.includes("Sign in")`);
+// sign in through the real form so POST /auth/login comes from the UI
+await evaluate(`(() => {
+  const set = (sel, val) => {
+    const el = document.querySelector(sel);
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(el, val);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  set('input[type=email]', "admin@doctortracker.com");
+  set('input[type=password]', "Admin@12345");
+  document.querySelector('button[type=submit]').click();
+  return "submitted";
+})()`);
+await sleep(3000);
+check(
+  "UI sign-in returns to the dashboard",
+  (await evaluate(`location.pathname`)) === "/dashboard",
+);
+
+// ------------------------------------------------------- coverage report -----
+const spec = await (await fetch(`${API.replace(/\/api\/v\d+$/, "")}/api/docs-json`)).json();
+const declared = new Set();
+for (const [path, ops] of Object.entries(spec.paths)) {
+  const norm = path.replace(/[a-z0-9]{20,}/gi, "{id}");
+  for (const method of Object.keys(ops)) declared.add(`${method.toUpperCase()} ${norm}`);
+}
+const seen = new Set(
+  [...apiHits.keys()].map((k) => k.replace(/^(\w+) .*/, "$1 ").trim() + k.slice(k.indexOf(" "))),
+);
+
+const rows = [];
+for (const d of declared) {
+  const method = d.split(" ")[0];
+  const path = d.slice(method.length + 1);
+  const hit = [...apiHits.keys()].some((k) => {
+    const [hm, hp] = [k.slice(0, k.indexOf(" ")), k.slice(k.indexOf(" ") + 1)];
+    return (
+      hm === method && (hp === path || hp.replace(/\{id\}/g, "") === path.replace(/\{[^}]+\}/g, ""))
+    );
+  });
+  rows.push({ method, path, hit });
+}
+rows.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+console.log("\nAPI endpoint coverage (observed in the browser during this run)");
+console.log("-".repeat(74));
+for (const r of rows) {
+  console.log(`  ${r.hit ? "ok  " : "GAP "} ${r.method.padEnd(6)} ${r.path}`);
+}
+const covered = rows.filter((r) => r.hit).length;
+console.log("-".repeat(74));
+console.log(`  covered ${covered}/${rows.length} endpoints`);
+check(
+  "every backend endpoint was exercised by the UI",
+  covered === rows.length,
+  `${covered}/${rows.length}`,
 );
 
 console.log(
