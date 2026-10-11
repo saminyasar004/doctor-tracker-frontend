@@ -260,13 +260,17 @@ function DoctorProfilePage() {
       id: "patient",
       header: "Patient",
       cell: (row) => (
-        <div className="flex min-w-0 items-center gap-3">
+        <Link
+          to="/patients/$id"
+          params={{ id: row.id }}
+          className="flex min-w-0 items-center gap-3 hover:underline"
+        >
           <UserAvatar name={row.name} src={row.avatarUrl} className="size-9" />
           <div className="min-w-0">
             <p className="truncate font-medium">{row.name}</p>
             <p className="truncate text-xs text-muted-foreground">{row.email ?? row.phone}</p>
           </div>
-        </div>
+        </Link>
       ),
     },
     {
@@ -306,6 +310,11 @@ function DoctorProfilePage() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem asChild>
+              <Link to="/patients/$id" params={{ id: row.id }}>
+                <Users /> Open profile
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link
                 to="/patients"
@@ -583,6 +592,7 @@ function DoctorProfilePage() {
             <DoctorForm
               defaultValues={doctor}
               hospitals={doctorFilters?.hospitals}
+              specializations={doctorFilters?.specializations}
               submitting={saveDoctor.isPending}
               submitLabel="Save changes"
               onCancel={() => setEditOpen(false)}
@@ -603,6 +613,7 @@ function DoctorProfilePage() {
               submitting={addPatient.isPending}
               submitLabel="Add patient"
               doctors={doctorOptions}
+              conditions={conditionOptions?.conditions}
               onCancel={() => setAddOpen(false)}
               onSubmit={(v: PatientInput) => addPatient.mutate({ ...v, doctorId: id })}
             />

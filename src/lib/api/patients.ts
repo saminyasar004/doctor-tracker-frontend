@@ -72,7 +72,3 @@ export interface PatientFilterOptions {
 export async function listPatientFilterOptions(): Promise<PatientFilterOptions> {
   return apiFetch<PatientFilterOptions>("/patients/filter-options");
 }
-
-export async function listConditions(): Promise<string[]> {
-  return (await listPatientFilterOptions()).conditions;
-}

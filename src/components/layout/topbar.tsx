@@ -20,7 +20,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "@/components/common/theme-toggle";
 import { UserAvatar } from "@/components/common/user-avatar";
+import { useQuery } from "@tanstack/react-query";
 import { getSession, logout } from "@/lib/api/auth";
+import { sessionQuery } from "@/lib/queries";
 import { CommandPalette, type PaletteTarget } from "./command-palette";
 
 function crumbs(path: string): { label: string; to?: "/dashboard" | "/doctors" | "/patients" }[] {
@@ -35,7 +37,9 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const user = getSession()?.user;
+  // Falls back to the cached session so the header paints before /auth/me answers.
+  const { data: freshUser } = useQuery(sessionQuery);
+  const user = freshUser ?? getSession()?.user;
   const [isMac, setIsMac] = useState(true);
 
   useEffect(() => {

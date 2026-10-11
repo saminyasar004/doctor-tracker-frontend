@@ -110,15 +110,18 @@ src/
 │   ├── _app.dashboard.tsx
 │   ├── _app.doctors.index.tsx  # doctors list
 │   ├── _app.doctors.$id.tsx    # doctor profile + their patients
-│   └── _app.patients.tsx       # global patient workspace
+│   ├── _app/patients/
+│   │   ├── index.tsx           # global patient workspace
+│   │   └── $id.tsx             # patient profile (contact, care, record)
 ├── components/
 │   ├── ui/                     # shadcn primitives (unmodified upstream)
 │   ├── common/                 # data-table, filters, pagination, states, badges, …
 │   ├── forms/                  # doctor-form, patient-form, combobox
+│   ├── common/avatar-upload    # uploads through POST /uploads/image (never a data URL)
 │   ├── charts/                 # recharts wrappers
 │   └── layout/                 # sidebar, topbar, command palette, logo
 ├── lib/
-│   ├── api/                    # typed API client (client.ts, auth, doctors, patients, dashboard, mappers)
+│   ├── api/                    # typed API client: client, auth, health, doctors, patients, uploads, dashboard, mappers
 │   ├── queries.ts              # TanStack Query factories + cache keys
 │   ├── types.ts                # domain models mirroring the API
 │   └── search-params.ts        # URL search param parsers
@@ -193,8 +196,24 @@ bun run smoke       # browser journey against the running API
 ```
 
 `bun run smoke` drives headless Chrome through the real UI: it signs in, creates a doctor through the
-form, searches for it, opens its profile and deletes it again, then checks that the patient filters and
-pagination work. It cleans up after itself, so it is safe to re-run.
+form, searches for it, opens its profile and deletes it again, checks the patient filters and pagination,
+uploads and deletes an avatar, edits both a doctor and a patient, rotates the access token, signs out and
+signs back in through the form. It cleans up after itself, so it is safe to re-run.
+
+It also records every request the browser makes and diffs the result against the API's own OpenAPI
+document, so the run ends with a coverage table:
+
+```
+API endpoint coverage (observed in the browser during this run)
+--------------------------------------------------------------------------
+  ok   POST   /api/v1/auth/login
+  ok   POST   /api/v1/auth/logout
+  ...
+  covered 27/27 endpoints
+```
+
+That makes "every endpoint is wired to a page" a measured result rather than an assumption; the final
+check fails the run if any endpoint is never exercised.
 
 ---
 
@@ -236,16 +255,25 @@ fallback still applies if only the files are uploaded.
 
 ### Environment variables
 
-| Where             | Variable       | Value                                                  |
-| ----------------- | -------------- | ------------------------------------------------------ |
-| Netlify build env | `VITE_API_URL` | `https://<your-api-host>/api/v1`                       |
-| **API** env       | `FRONTEND_URL` | `https://doctortracker.netlify.app` (the exact origin) |
+| Where             | Variable       | Value                                                                             |
+| ----------------- | -------------- | --------------------------------------------------------------------------------- |
+| Netlify build env | `VITE_API_URL` | `https://<your-api-host>/api/v1` — e.g. `https://doctor-tracker-api.onrender.com/api/v1` |
+| **API** env       | `FRONTEND_URL` | `https://doctortrackerr.netlify.app` (comma-separate to allow several origins)     |
 
-Both sides are required. `VITE_API_URL` is inlined at build time, and the API does **not** allow a
-wildcard CORS origin because it authenticates with cookies — a mismatch shows up in the browser console
-as `net::ERR_FAILED` on every request, with the list stuck on its loading skeleton.
+Both sides are required. `VITE_API_URL` is inlined into the bundle at **build** time, and the API
+does **not** allow a wildcard CORS origin because it authenticates with cookies.
 
-Rebuild after changing `VITE_API_URL`.
+`VITE_API_URL` must be set in the Netlify UI under **Site configuration → Environment variables**
+(then trigger a rebuild). Without it the bundle falls back to `http://localhost:4000/api/v1`, which
+resolves inside the visitor's browser and fails with `net::ERR_FAILED` / `Failed to fetch`. The app
+detects this case and shows *"The API address is not configured for this deployment…"* on the login
+screen instead of a bare network error.
+
+For debugging, the URL can also be overridden at runtime without rebuilding:
+
+```js
+window.__DOCTOR_TRACKER_API_URL__ = "https://your-api-host/api/v1";
+```
 
 ### Other hosts
 
@@ -256,10 +284,11 @@ Any static host works; just make sure `/` and every unknown path serve `index.ht
 
 ## Troubleshooting
 
-| Symptom                                        | Cause / fix                                                                                    |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Every page redirects to `/login`               | The token was cleared — sign in again; check the browser console for a `401`                   |
-| Sign-in fails with `Invalid email or password` | The API is not seeded: run `yarn prisma db seed` in the backend                                |
+| Symptom                                        | Cause / fix                                                                                                                            |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| *"The API address is not configured…"*         | `VITE_API_URL` is missing from the Netlify build environment; set it and rebuild                                                     |
+| Every page redirects to `/login`               | The token was cleared — sign in again; check the browser console for a `401`                                                         |
+| *"Could not reach the API at …"*               | The API is not deployed/reachable from the browser, or its `FRONTEND_URL` does not list this exact site origin                        |
 | Lists stay empty, network shows `401`          | The access token expired and the refresh call failed (backend down or `FRONTEND_URL` mismatch) |
 | "Could not load doctors"                       | The API is unreachable — check `VITE_API_URL` and that the backend is running                  |
 | `429 Too Many Requests` on login               | The backend limits login to 5/minute; wait a minute                                            |

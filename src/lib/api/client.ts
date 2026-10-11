@@ -1,15 +1,72 @@
 import type { Paginated } from "../types";
 
-/**
- * Base URL of the Doctor Tracker API.
- *
- * Override per environment with `VITE_API_URL` (see `.env.example`). The default
- * matches the backend's local development port.
- */
-export const API_URL =
-  import.meta.env["VITE_API_URL"]?.replace(/\/+$/, "") ?? "http://localhost:4000/api/v1";
-
+const LOCAL_DEV_API_URL = "http://localhost:4000/api/v1";
 const TOKEN_KEY = "dt_access_token";
+
+/** `window` is untyped; a deployment can pin the API URL at runtime (see README). */
+declare global {
+  interface Window {
+    __DOCTOR_TRACKER_API_URL__?: string;
+  }
+}
+
+function isLocalHost(host: string): boolean {
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+}
+
+/**
+ * Resolves the API base URL, preferring an explicit setting over the local default:
+ *
+ * 1. `window.__DOCTOR_TRACKER_API_URL__` — runtime override, useful when the bundle
+ *    is served from a host whose API address is only known at deploy time.
+ * 2. `VITE_API_URL` — baked in at build time; set this in the Netlify environment.
+ * 3. `http://localhost:4000/api/v1` — local development fallback.
+ *
+ * Falling through to (3) on a non-local host means the bundle was built without
+ * `VITE_API_URL`; that is detected in {@link assertApiConfigured} so the user gets
+ * an actionable message instead of the browser's opaque "Failed to fetch".
+ */
+function resolveApiUrl(): { url: string; configured: boolean } {
+  const runtime = typeof window !== "undefined" ? window.__DOCTOR_TRACKER_API_URL__ : undefined;
+  const buildTime = import.meta.env["VITE_API_URL"];
+  const explicit = runtime ?? buildTime;
+
+  if (explicit && explicit.trim() !== "") {
+    return { url: explicit.trim().replace(/\/+$/, ""), configured: true };
+  }
+
+  const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  return { url: LOCAL_DEV_API_URL, configured: isLocalHost(host) };
+}
+
+const resolved = resolveApiUrl();
+
+export const API_URL = resolved.url;
+
+/**
+ * Throws a readable error when a production bundle points at `localhost`, which
+ * happens whenever `VITE_API_URL` is missing from the build environment.
+ */
+function assertApiConfigured(): void {
+  if (resolved.configured) return;
+  throw new ApiError(
+    "The API address is not configured for this deployment. Set VITE_API_URL to your " +
+      `backend URL (for example https://api.example.com/api/v1) and redeploy. ` +
+      `Currently the app is calling ${API_URL}, which only resolves on the machine running the API.`,
+  );
+}
+
+/** Turns a browser-level fetch rejection into an actionable message. */
+function toNetworkError(error: unknown): ApiError {
+  if (error instanceof ApiError) return error;
+  const target = API_URL.startsWith(LOCAL_DEV_API_URL)
+    ? "local API on port 4000"
+    : `API at ${API_URL}`;
+  return new ApiError(
+    `Could not reach the ${target}. Check that the API is running and that its CORS ` +
+      `settings allow this site (${typeof window !== "undefined" ? window.location.origin : "unknown"}).`,
+  );
+}
 
 /** Error carrying the HTTP status and the backend's field-level errors. */
 export class ApiError extends Error {
@@ -94,6 +151,8 @@ interface ErrorBody {
 export interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
+  /** `multipart/form-data` body; the browser sets the boundary, so no Content-Type is sent. */
+  formData?: FormData;
   signal?: AbortSignal;
   /** Internal: prevents infinite refresh loops. */
   retryOnUnauthorized?: boolean;
@@ -145,19 +204,30 @@ async function refreshSession(): Promise<boolean> {
  * lived), so an open tab does not log the user out mid-session.
  */
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, signal, retryOnUnauthorized = true } = options;
+  const { method = "GET", body, formData, signal, retryOnUnauthorized = true } = options;
 
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
-  const response = await fetch(`${API_URL}${path}`, {
-    method,
-    headers,
-    credentials: "include",
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    ...(signal ? { signal } : {}),
-  });
+  assertApiConfigured();
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      credentials: "include",
+      ...(formData !== undefined
+        ? { body: formData }
+        : body !== undefined
+          ? { body: JSON.stringify(body) }
+          : {}),
+      ...(signal ? { signal } : {}),
+    });
+  } catch (error) {
+    throw toNetworkError(error);
+  }
 
   if (response.status === 401 && retryOnUnauthorized && !path.startsWith("/auth/")) {
     if (await refreshSession()) {

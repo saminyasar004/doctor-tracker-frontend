@@ -1,4 +1,5 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query";
+import { refreshSessionUser } from "./api/auth";
 import { getDashboard, type DashboardRange } from "./api/dashboard";
 import {
   getDoctor,
@@ -10,7 +11,25 @@ import {
   type DoctorPatientQuery,
   type DoctorQuery,
 } from "./api/doctors";
-import { listPatientFilterOptions, listPatients, type PatientQuery } from "./api/patients";
+import {
+  getPatient,
+  listPatientFilterOptions,
+  listPatients,
+  type PatientQuery,
+} from "./api/patients";
+
+/**
+ * `GET /auth/me` — keeps the signed-in profile fresh.
+ *
+ * Revalidated on window focus so a role or name change made elsewhere shows up
+ * without a reload; `null` means the session is no longer valid.
+ */
+export const sessionQuery = queryOptions({
+  queryKey: ["auth", "me"],
+  queryFn: async () => (await refreshSessionUser())?.user ?? null,
+  staleTime: 60_000,
+  refetchOnWindowFocus: true,
+});
 
 export const doctorsQuery = (q: DoctorQuery) =>
   queryOptions({
@@ -52,6 +71,13 @@ export const patientsQuery = (q: PatientQuery) =>
     placeholderData: keepPreviousData,
   });
 
+export const patientQuery = (id: string) =>
+  queryOptions({
+    queryKey: ["patients", "detail", id],
+    queryFn: () => getPatient(id),
+    retry: false,
+  });
+
 export const patientFilterOptionsQuery = queryOptions({
   queryKey: ["patients", "filter-options"],
   queryFn: listPatientFilterOptions,
@@ -76,6 +102,7 @@ export const doctorKeys = {
 export const patientKeys = {
   all: ["patients"] as const,
   lists: () => ["patients", "list"] as const,
+  detail: (id: string) => ["patients", "detail", id] as const,
   filterOptions: () => ["patients", "filter-options"] as const,
 };
 

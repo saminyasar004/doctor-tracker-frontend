@@ -9,6 +9,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/layout/logo";
 import { DEMO_CREDENTIALS, login } from "@/lib/api/auth";
+import { describeApiProblem } from "@/lib/api/health";
+
+/**
+ * A rejected sign-in and an unreachable API look identical in the browser ("Failed
+ * to fetch"). `GET /health` is public, so probing it turns the second case into a
+ * precise message instead of a generic network error.
+ */
+async function explainLoginFailure(err: unknown): Promise<string> {
+  const message = err instanceof Error ? err.message : "Sign-in failed";
+  if (!/could not reach|api address is not configured|failed to fetch/i.test(message)) {
+    return message;
+  }
+  return describeApiProblem();
+}
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -42,7 +56,7 @@ function LoginPage() {
       await login(email, password, remember);
       navigate({ to: "/dashboard" });
     } catch (err) {
-      setError((err as Error).message);
+      setError(await explainLoginFailure(err));
       shake.start({ x: [0, -10, 10, -6, 6, 0], transition: { duration: 0.35 } });
     } finally {
       setLoading(false);

@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Outlet, redirect, useRouterState } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { isAuthenticated } from "@/lib/api/auth";
+import { sessionQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_app")({
   ssr: false,
@@ -18,6 +20,15 @@ function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobile, setMobile] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const queryClient = useQueryClient();
+
+  // Confirms the stored session against GET /auth/me and keeps the profile current.
+  useQuery(sessionQuery);
+  useEffect(() => {
+    const onFocus = () => void queryClient.invalidateQueries({ queryKey: ["auth"] });
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [queryClient]);
   return (
     <div className="flex min-h-screen">
       <motion.aside

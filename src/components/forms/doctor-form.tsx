@@ -12,14 +12,8 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { AvatarUpload } from "@/components/common/avatar-upload";
+import { Combobox } from "@/components/forms/combobox";
 import { SPECIALIZATIONS, type DoctorInput } from "@/lib/types";
 
 export const doctorSchema = z.object({
@@ -42,6 +36,7 @@ export function DoctorForm({
   submitLabel = "Save doctor",
   onCancel,
   hospitals = [],
+  specializations = [],
 }: {
   defaultValues?: Partial<DoctorInput> | undefined;
   onSubmit: (v: DoctorInput) => void;
@@ -49,7 +44,13 @@ export function DoctorForm({
   submitLabel?: string | undefined;
   onCancel?: (() => void) | undefined;
   hospitals?: string[] | undefined;
+  /**
+   * From `GET /doctors/filter-options`; the static list is kept as a fallback so the
+   * picker is never empty while the query is in flight.
+   */
+  specializations?: string[] | undefined;
 }) {
+  const specializationOptions = specializations.length > 0 ? specializations : SPECIALIZATIONS;
   const form = useForm<DoctorFormValues>({
     resolver: zodResolver(doctorSchema),
     defaultValues: {
@@ -74,7 +75,12 @@ export function DoctorForm({
               <FormLabel>
                 Photo <span className="text-muted-foreground">(optional)</span>
               </FormLabel>
-              <AvatarUpload value={field.value} onChange={field.onChange} />
+              <AvatarUpload
+                value={field.value}
+                onChange={field.onChange}
+                folder="doctors"
+                disabled={submitting}
+              />
             </FormItem>
           )}
         />
@@ -95,23 +101,18 @@ export function DoctorForm({
           <FormField
             control={form.control}
             name="specialization"
-            render={({ field }) => (
+            render={({ field, fieldState }) => (
               <FormItem>
                 <FormLabel>Specialization</FormLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <FormControl>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select…" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {SPECIALIZATIONS.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <FormControl>
+                  <Combobox
+                    allowCustom
+                    value={field.value}
+                    onChange={field.onChange}
+                    placeholder="Select or type a specialization"
+                    options={specializationOptions.map((s) => ({ value: s, label: s }))}
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}

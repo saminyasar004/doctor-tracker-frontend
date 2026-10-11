@@ -95,14 +95,6 @@ export async function listDoctorFilterOptions(): Promise<DoctorFilterOptions> {
   return apiFetch<DoctorFilterOptions>("/doctors/filter-options");
 }
 
-export async function listHospitals(): Promise<string[]> {
-  return (await listDoctorFilterOptions()).hospitals;
-}
-
-export async function listSpecializations(): Promise<string[]> {
-  return (await listDoctorFilterOptions()).specializations;
-}
-
 export async function listDoctorOptions(): Promise<DoctorOption[]> {
   const page = await apiFetchPaginated<ApiDoctor>("/doctors?limit=100&sortBy=name&order=asc");
   return page.data.map((d) => {

@@ -1,7 +1,16 @@
 import { useMemo, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, Pencil, Phone, Plus, Stethoscope, Trash2, UserRound } from "lucide-react";
+import {
+  MoreHorizontal,
+  Pencil,
+  Phone,
+  Plus,
+  Stethoscope,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { DateRange } from "react-day-picker";
 
@@ -79,7 +88,7 @@ export type PatientsSearch = {
   limit?: number | undefined;
 };
 
-export const Route = createFileRoute("/_app/patients")({
+export const Route = createFileRoute("/_app/patients/")({
   validateSearch: (s: Record<string, unknown>): PatientsSearch => ({
     q: str(s["q"]),
     condition: str(s["condition"]),
@@ -239,13 +248,17 @@ function PatientsPage() {
       id: "patient",
       header: "Patient",
       cell: (row) => (
-        <div className="flex min-w-0 items-center gap-3">
+        <Link
+          to="/patients/$id"
+          params={{ id: row.id }}
+          className="flex min-w-0 items-center gap-3 hover:underline"
+        >
           <UserAvatar name={row.name} src={row.avatarUrl} className="size-9" />
           <div className="min-w-0">
             <p className="truncate font-medium">{row.name}</p>
             <p className="truncate text-xs text-muted-foreground">{row.email ?? row.phone}</p>
           </div>
-        </div>
+        </Link>
       ),
     },
     {
@@ -312,6 +325,11 @@ function PatientsPage() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem asChild>
+              <Link to="/patients/$id" params={{ id: row.id }}>
+                <Users /> Open profile
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link to="/doctors/$id" params={{ id: row.doctorId }} search={{}}>
                 <Stethoscope /> View doctor
@@ -525,6 +543,7 @@ function PatientsPage() {
               key={editing?.id ?? "new"}
               defaultValues={editing}
               doctors={options?.doctors}
+              conditions={options?.conditions}
               submitting={save.isPending}
               submitLabel={editing ? "Save changes" : "Create patient"}
               onCancel={() => setFormOpen(false)}

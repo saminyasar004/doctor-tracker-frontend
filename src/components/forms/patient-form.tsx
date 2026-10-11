@@ -58,6 +58,7 @@ export function PatientForm({
   submitLabel = "Save patient",
   onCancel,
   doctors,
+  conditions = [],
 }: {
   defaultValues?: Partial<PatientInput> | undefined;
   onSubmit: (v: PatientInput) => void;
@@ -66,7 +67,10 @@ export function PatientForm({
   onCancel?: (() => void) | undefined;
   /** When provided, a doctor picker is shown (for reassignment). */
   doctors?: DoctorOption[] | undefined;
+  /** From `GET /patients/filter-options`; the static list is the first-paint fallback. */
+  conditions?: string[] | undefined;
 }) {
+  const conditionOptions = conditions.length > 0 ? conditions : CONDITIONS;
   const form = useForm<Values>({
     resolver: zodResolver(patientSchema),
     defaultValues: {
@@ -101,7 +105,12 @@ export function PatientForm({
               <FormLabel>
                 Photo <span className="text-muted-foreground">(optional)</span>
               </FormLabel>
-              <AvatarUpload value={field.value} onChange={field.onChange} />
+              <AvatarUpload
+                value={field.value}
+                onChange={field.onChange}
+                folder="patients"
+                disabled={submitting}
+              />
             </FormItem>
           )}
         />
@@ -193,14 +202,15 @@ export function PatientForm({
           render={({ field, fieldState }) => (
             <FormItem>
               <FormLabel>Condition</FormLabel>
-              <Combobox
-                allowCustom
-                value={field.value}
-                onChange={field.onChange}
-                invalid={!!fieldState.error}
-                placeholder="Select or type a condition"
-                options={CONDITIONS.map((c) => ({ value: c, label: c }))}
-              />
+              <FormControl>
+                <Combobox
+                  allowCustom
+                  value={field.value}
+                  onChange={field.onChange}
+                  placeholder="Select or type a condition"
+                  options={conditionOptions.map((c) => ({ value: c, label: c }))}
+                />
+              </FormControl>
               <FormMessage />
             </FormItem>
           )}
@@ -212,18 +222,19 @@ export function PatientForm({
             render={({ field, fieldState }) => (
               <FormItem>
                 <FormLabel>Assigned doctor</FormLabel>
-                <Combobox
-                  value={field.value}
-                  onChange={field.onChange}
-                  invalid={!!fieldState.error}
-                  placeholder="Choose a doctor"
-                  options={doctors.map((d) => ({
-                    value: d.id,
-                    label: d.name,
-                    hint: d.specialization ?? undefined,
-                    icon: <UserAvatar name={d.name} src={d.avatarUrl} className="size-5" />,
-                  }))}
-                />
+                <FormControl>
+                  <Combobox
+                    value={field.value}
+                    onChange={field.onChange}
+                    placeholder="Choose a doctor"
+                    options={doctors.map((d) => ({
+                      value: d.id,
+                      label: d.name,
+                      hint: d.specialization ?? undefined,
+                      icon: <UserAvatar name={d.name} src={d.avatarUrl} className="size-5" />,
+                    }))}
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}

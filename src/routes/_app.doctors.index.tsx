@@ -497,6 +497,7 @@ function DoctorsPage() {
               key={editing?.id ?? "new"}
               defaultValues={editing}
               hospitals={options?.hospitals}
+              specializations={options?.specializations}
               submitting={save.isPending}
               submitLabel={editing ? "Save changes" : "Create doctor"}
               onCancel={() => setFormOpen(false)}
