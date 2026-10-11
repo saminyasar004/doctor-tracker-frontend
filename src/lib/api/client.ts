@@ -15,16 +15,11 @@ function isLocalHost(host: string): boolean {
 }
 
 /**
- * Resolves the API base URL, preferring an explicit setting over the local default:
+ * Resolves the API base URL: a runtime `window.__DOCTOR_TRACKER_API_URL__` override,
+ * then the build-time `VITE_API_URL`, then the local development default.
  *
- * 1. `window.__DOCTOR_TRACKER_API_URL__` — runtime override, useful when the bundle
- *    is served from a host whose API address is only known at deploy time.
- * 2. `VITE_API_URL` — baked in at build time; set this in the Netlify environment.
- * 3. `http://localhost:4000/api/v1` — local development fallback.
- *
- * Falling through to (3) on a non-local host means the bundle was built without
- * `VITE_API_URL`; that is detected in {@link assertApiConfigured} so the user gets
- * an actionable message instead of the browser's opaque "Failed to fetch".
+ * Falling back to the default on a non-local host means the bundle was built without
+ * `VITE_API_URL`; {@link assertApiConfigured} turns that into a readable message.
  */
 function resolveApiUrl(): { url: string; configured: boolean } {
   const runtime = typeof window !== "undefined" ? window.__DOCTOR_TRACKER_API_URL__ : undefined;
@@ -99,20 +94,12 @@ export class ApiError extends Error {
 /* -------------------------------------------------------------------------- */
 
 let accessToken: string | null = readStoredToken();
-const listeners = new Set<(token: string | null) => void>();
 const endedListeners = new Set<() => void>();
 
-/**
- * Called when the API rejects the session for good - the refresh token is missing,
- * revoked, or belongs to a user that no longer exists. Clearing the access token
- * alone is not enough: the cached profile is stored separately, so the router
- * would still consider the visitor signed in and every query would 401 again.
- */
+/** Latched once the refresh token is refused, so retries stop re-attempting it. */
 let sessionEnded = false;
 
 function notifySessionEnded(): void {
-  // Latched so concurrent and retried requests stop attempting a refresh that is
-  // already known to fail, instead of replaying the same dead round-trip.
   sessionEnded = true;
   endedListeners.forEach((listener) => listener());
 }
@@ -123,12 +110,8 @@ function readStoredToken(): string | null {
 }
 
 /**
- * Holds the access token in memory and mirrors it to `localStorage`.
- *
- * The backend also sets httpOnly cookies, so the browser is authenticated even if
- * this value is lost; the token is kept so requests made from contexts that
- * cannot rely on cookies (and so the value survives a full page reload) still
- * carry `Authorization: Bearer`.
+ * Holds the access token in memory and mirrors it to `localStorage`, so the value
+ * survives a reload and requests made without cookies still send `Authorization`.
  */
 export function setAccessToken(token: string | null): void {
   accessToken = token;
@@ -137,22 +120,12 @@ export function setAccessToken(token: string | null): void {
   if (typeof window === "undefined") return;
   if (token) window.localStorage.setItem(TOKEN_KEY, token);
   else window.localStorage.removeItem(TOKEN_KEY);
-  listeners.forEach((listener) => listener(token));
-}
-
-export function onTokenChange(listener: (token: string | null) => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
 }
 
 /** Notified when the session can no longer be recovered. Returns an unsubscribe. */
 export function onSessionEnded(listener: () => void): () => void {
   endedListeners.add(listener);
   return () => endedListeners.delete(listener);
-}
-
-export function getAccessToken(): string | null {
-  return accessToken;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -197,25 +170,17 @@ async function parseError(response: Response): Promise<ApiError> {
 }
 
 /**
- * In-flight refresh, shared by every caller.
- *
- * The backend treats a replayed refresh token as theft and revokes the whole
- * session family, so exactly one request may be in flight at a time. The previous
- * `setTimeout(..., 0)` teardown released the slot on the next tick, which let a
- * second 401 start a second refresh before the rotated cookie had reached the
- * browser - logging the user out at random.
+ * In-flight refresh, shared by every caller. The backend revokes the whole session
+ * family if a refresh token is replayed, so only one may run at a time - releasing
+ * the slot on the next tick let a second 401 race the rotated cookie and log the
+ * user out at random.
  */
 let refreshInFlight: Promise<boolean> | null = null;
 
-/** Bumped once a refresh completes, so a later 401 legitimately starts a new one. */
+/** Bumped after a refresh completes, so a later 401 may start a new one. */
 let refreshGeneration = 0;
 
-/**
- * Rotates the token pair through `POST /auth/refresh`.
- *
- * Concurrent callers share one request. A refresh started after a previous one
- * completed waits for that rotation to land instead of racing it.
- */
+/** Rotates the token pair through `POST /auth/refresh`. */
 async function refreshSession(): Promise<boolean> {
   if (sessionEnded) return false;
 
@@ -241,13 +206,9 @@ async function refreshSession(): Promise<boolean> {
 
   const settled = await refreshInFlight;
 
-  // Only the caller that observed this generation releases the slot; the others are
-  // unblocked by the same promise and must not start a competing rotation.
+  // Only the caller that observed this generation releases the slot.
   if (refreshGeneration === generation) {
-    if (settled) {
-      // The rotated cookie is in place now, so a *later* 401 may refresh again.
-      refreshGeneration += 1;
-    }
+    if (settled) refreshGeneration += 1;
     refreshInFlight = null;
   }
 

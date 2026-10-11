@@ -76,12 +76,8 @@ export async function deleteImage(
 
 /**
  * Recovers the `publicId` from an avatar URL so an edit form can delete the image it
- * is about to replace. Understands the two shapes the API returns:
- * - Cloudinary: `<base>/image/upload/<transform>/<version>/<folder>/<publicId>.<ext>`
- * - local dev:  `<api>/uploads/<folder>/<publicId>.<ext>`
- *
- * Returns `undefined` for anything the API did not store, so an externally hosted
- * avatar is never sent to `DELETE /uploads/image`.
+ * replaces, handling both the Cloudinary URL and the local fallback path. Returns
+ * `undefined` for anything the API did not store.
  */
 export function publicIdFromUrl(url: string): string | undefined {
   if (!url) return undefined;

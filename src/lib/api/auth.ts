@@ -111,12 +111,9 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * Subscribes to unrecoverable sessions.
- *
- * The access token expiring is routine - `apiFetch` rotates it silently. A rejected
- * refresh token is not: the stored profile has to go too, or `isAuthenticated()`
- * keeps returning true, the router keeps rendering the private shell, and every
- * query fails in a loop until the user signs in again by hand.
+ * Subscribes to unrecoverable sessions. A rejected refresh token means the stored
+ * profile must go too, or `isAuthenticated()` keeps returning true and the private
+ * shell renders with every query failing.
  */
 export function onSessionExpired(listener: () => void): () => void {
   return onSessionEnded(() => {

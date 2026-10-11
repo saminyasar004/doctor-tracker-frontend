@@ -6,15 +6,10 @@ import { deleteImage, publicIdFromUrl, uploadImage, type UploadFolder } from "@/
 /**
  * Avatar picker backed by `POST /uploads/image`.
  *
- * Picking a file uploads it straight to the API and hands the returned delivery URL
- * back through `onChange`, which is what the doctor/patient `avatarUrl` field
- * expects — the DTOs validate it as an absolute http(s) URL, so the file can never
- * be embedded as a data URL in the record itself.
- *
- * Replacing or removing a photo deletes the previously stored asset through
- * `DELETE /uploads/image` so the CDN does not accumulate orphans. A failed delete
- * is not surfaced as an error: the record is already saved and storage backends are
- * idempotent.
+ * A picked file is uploaded immediately and the returned delivery URL is handed
+ * back through `onChange`; the DTOs validate `avatarUrl` as an absolute http(s)
+ * URL, so the file must never be embedded as a data URL. Replacing or removing a
+ * photo deletes the stored asset so the CDN does not accumulate orphans.
  */
 export function AvatarUpload({
   value,

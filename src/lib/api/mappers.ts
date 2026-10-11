@@ -1,4 +1,4 @@
-import type { Doctor, Gender, Patient, User } from "../types";
+import type { Doctor, Patient } from "../types";
 
 /**
  * Wire shapes.
@@ -14,8 +14,6 @@ export type ApiPatient = Omit<Patient, "email" | "notes" | "avatarUrl"> & {
   notes: string | null;
   avatarUrl: string | null;
 };
-
-export type ApiUser = Omit<User, "avatarUrl"> & { avatarUrl: string | null };
 
 export type ApiDoctorDetail = ApiDoctor & { latestPatientAt: string | null };
 
@@ -35,11 +33,3 @@ export function toPatient(row: ApiPatient): Patient {
     avatarUrl: optional(row.avatarUrl),
   };
 }
-
-export function toUser(row: ApiUser): User {
-  return { ...row, avatarUrl: optional(row.avatarUrl) };
-}
-
-/** Narrowing helper used by the gender filter. */
-export const isGender = (value: string): value is Gender =>
-  value === "MALE" || value === "FEMALE" || value === "OTHER";
