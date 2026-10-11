@@ -331,9 +331,27 @@ const login = await fetch(`${API}/auth/login`, {
   body: JSON.stringify({ email: "admin@doctortracker.com", password: "Admin@12345" }),
 });
 const auth = await login.json();
-await goto(baseUrl);
-await evaluate(`localStorage.setItem("dt_access_token", ${JSON.stringify(auth.data.accessToken)});
-  localStorage.setItem("dt_user", ${JSON.stringify(JSON.stringify(auth.data.user))}); "ok"`);
+
+// Sign in through the form so the browser holds real httpOnly cookies. Injecting
+// localStorage alone leaves the refresh cookie unset, which makes every later
+// refresh a 401 - the client then correctly treats the session as unrecoverable
+// and bounces to /login, so the rest of the journey could never run.
+await goto(`${baseUrl}/login`);
+await waitFor(`document.body.innerText.includes("Sign in")`);
+await evaluate(`(() => {
+  const set = (sel, val) => {
+    const el = document.querySelector(sel);
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(el, val);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  set('input[type=email]', "admin@doctortracker.com");
+  set('input[type=password]', "Admin@12345");
+  document.querySelector('button[type=submit]').click();
+  return "submitted";
+})()`);
+await waitFor(`location.pathname === "/dashboard"`, 15000);
+check("UI sign-in reaches the dashboard", (await evaluate(`location.pathname`)) === "/dashboard");
 
 const stamp = Date.now();
 const NAME = `Dr. UI Smoke ${stamp}`;

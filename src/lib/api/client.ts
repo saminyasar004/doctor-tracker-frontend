@@ -100,6 +100,22 @@ export class ApiError extends Error {
 
 let accessToken: string | null = readStoredToken();
 const listeners = new Set<(token: string | null) => void>();
+const endedListeners = new Set<() => void>();
+
+/**
+ * Called when the API rejects the session for good - the refresh token is missing,
+ * revoked, or belongs to a user that no longer exists. Clearing the access token
+ * alone is not enough: the cached profile is stored separately, so the router
+ * would still consider the visitor signed in and every query would 401 again.
+ */
+let sessionEnded = false;
+
+function notifySessionEnded(): void {
+  // Latched so concurrent and retried requests stop attempting a refresh that is
+  // already known to fail, instead of replaying the same dead round-trip.
+  sessionEnded = true;
+  endedListeners.forEach((listener) => listener());
+}
 
 function readStoredToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -116,6 +132,8 @@ function readStoredToken(): string | null {
  */
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  // A fresh token means a fresh session; re-arm the refresh path.
+  if (token) sessionEnded = false;
   if (typeof window === "undefined") return;
   if (token) window.localStorage.setItem(TOKEN_KEY, token);
   else window.localStorage.removeItem(TOKEN_KEY);
@@ -125,6 +143,12 @@ export function setAccessToken(token: string | null): void {
 export function onTokenChange(listener: (token: string | null) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Notified when the session can no longer be recovered. Returns an unsubscribe. */
+export function onSessionEnded(listener: () => void): () => void {
+  endedListeners.add(listener);
+  return () => endedListeners.delete(listener);
 }
 
 export function getAccessToken(): string | null {
@@ -172,10 +196,30 @@ async function parseError(response: Response): Promise<ApiError> {
   );
 }
 
+/**
+ * In-flight refresh, shared by every caller.
+ *
+ * The backend treats a replayed refresh token as theft and revokes the whole
+ * session family, so exactly one request may be in flight at a time. The previous
+ * `setTimeout(..., 0)` teardown released the slot on the next tick, which let a
+ * second 401 start a second refresh before the rotated cookie had reached the
+ * browser - logging the user out at random.
+ */
 let refreshInFlight: Promise<boolean> | null = null;
 
-/** Rotates the token pair through `POST /auth/refresh`. Concurrent callers share one request. */
+/** Bumped once a refresh completes, so a later 401 legitimately starts a new one. */
+let refreshGeneration = 0;
+
+/**
+ * Rotates the token pair through `POST /auth/refresh`.
+ *
+ * Concurrent callers share one request. A refresh started after a previous one
+ * completed waits for that rotation to land instead of racing it.
+ */
 async function refreshSession(): Promise<boolean> {
+  if (sessionEnded) return false;
+
+  const generation = refreshGeneration;
   refreshInFlight ??= (async () => {
     try {
       const response = await fetch(`${API_URL}/auth/refresh`, {
@@ -194,7 +238,20 @@ async function refreshSession(): Promise<boolean> {
       setTimeout(() => (refreshInFlight = null), 0);
     }
   })();
-  return refreshInFlight;
+
+  const settled = await refreshInFlight;
+
+  // Only the caller that observed this generation releases the slot; the others are
+  // unblocked by the same promise and must not start a competing rotation.
+  if (refreshGeneration === generation) {
+    if (settled) {
+      // The rotated cookie is in place now, so a *later* 401 may refresh again.
+      refreshGeneration += 1;
+    }
+    refreshInFlight = null;
+  }
+
+  return settled;
 }
 
 /**
@@ -233,7 +290,9 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     if (await refreshSession()) {
       return apiFetch<T>(path, { ...options, retryOnUnauthorized: false });
     }
+    // The refresh token is gone or invalid: the session is unrecoverable.
     setAccessToken(null);
+    notifySessionEnded();
   }
 
   if (!response.ok) {

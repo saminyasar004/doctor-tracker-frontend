@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
-import { createFileRoute, Outlet, redirect, useRouterState } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Outlet,
+  redirect,
+  useNavigate,
+  useRouterState,
+} from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Topbar } from "@/components/layout/topbar";
-import { isAuthenticated } from "@/lib/api/auth";
+import { isAuthenticated, onSessionExpired } from "@/lib/api/auth";
 import { sessionQuery } from "@/lib/queries";
 
 export const Route = createFileRoute("/_app")({
@@ -21,9 +27,19 @@ function AppLayout() {
   const [mobile, setMobile] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Confirms the stored session against GET /auth/me and keeps the profile current.
   useQuery(sessionQuery);
+
+  // An unrecoverable session (deleted account, revoked refresh token) must leave the
+  // private shell at once, otherwise every query keeps failing in a loop.
+  useEffect(() => {
+    return onSessionExpired(() => {
+      queryClient.clear();
+      void navigate({ to: "/login", replace: true });
+    });
+  }, [navigate, queryClient]);
   useEffect(() => {
     const onFocus = () => void queryClient.invalidateQueries({ queryKey: ["auth"] });
     window.addEventListener("focus", onFocus);

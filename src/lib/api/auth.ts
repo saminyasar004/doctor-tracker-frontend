@@ -1,5 +1,5 @@
 import type { User } from "../types";
-import { ApiError, apiFetch, setAccessToken } from "./client";
+import { ApiError, apiFetch, onSessionEnded, setAccessToken } from "./client";
 
 export interface Session {
   user: User;
@@ -80,7 +80,8 @@ export async function refreshSessionUser(): Promise<Session | null> {
     return cached;
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
-      cached = null;
+      // The account was deleted or disabled while the tab was open.
+      clearLocalSession();
       return null;
     }
     throw error;
@@ -89,6 +90,16 @@ export async function refreshSessionUser(): Promise<Session | null> {
 
 export const isAuthenticated = (): boolean => getSession() !== null;
 
+/** Drops every trace of the session from memory and from storage. */
+function clearLocalSession(): void {
+  cached = null;
+  setAccessToken(null);
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(USER_KEY);
+    window.sessionStorage.removeItem(USER_KEY);
+  }
+}
+
 /** Revokes the session server-side and clears the local state. */
 export async function logout(): Promise<void> {
   try {
@@ -96,10 +107,20 @@ export async function logout(): Promise<void> {
   } catch {
     // Signing out locally must succeed even when the API is unreachable.
   }
-  cached = null;
-  setAccessToken(null);
-  if (typeof window !== "undefined") {
-    window.localStorage.removeItem(USER_KEY);
-    window.sessionStorage.removeItem(USER_KEY);
-  }
+  clearLocalSession();
+}
+
+/**
+ * Subscribes to unrecoverable sessions.
+ *
+ * The access token expiring is routine - `apiFetch` rotates it silently. A rejected
+ * refresh token is not: the stored profile has to go too, or `isAuthenticated()`
+ * keeps returning true, the router keeps rendering the private shell, and every
+ * query fails in a loop until the user signs in again by hand.
+ */
+export function onSessionExpired(listener: () => void): () => void {
+  return onSessionEnded(() => {
+    clearLocalSession();
+    listener();
+  });
 }
